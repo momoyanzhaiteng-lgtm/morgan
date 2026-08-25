@@ -36,7 +36,7 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 
 # --------------------------------------------------
-# 3. Hugging Face API 呼び出し関数
+# 3. Hugging Face API 呼び出し関数 (Llama-3.1-8B)
 # --------------------------------------------------
 def query_huggingface(prompt):
     API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
@@ -47,7 +47,7 @@ def query_huggingface(prompt):
     }
     
     payload = {
-        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "model": "meta-llama/Llama-3.1-8B-Instruct",
         "messages": [
             {
                 "role": "system",
