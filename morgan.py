@@ -14,8 +14,13 @@ ALLOWED_CHANNEL_ID = os.getenv("ALLOWED_CHANNEL_ID") or os.environ.get("ALLOWED_
 print(f"--- [DEBUG] TOKEN Detected: {bool(TOKEN)} ---")
 print(f"--- [DEBUG] HF_TOKEN Detected: {bool(HF_TOKEN)} ---")
 
+# Discord Token チェック
 if not TOKEN:
     raise ValueError("エラー: 環境変数 'TOKEN' が設定されていません。RailwayのVariablesタブで 'TOKEN' を設定してください。")
+
+# Hugging Face Token チェック（未設定または空文字の場合にエラー停止）
+if not HF_TOKEN or len(HF_TOKEN.strip()) == 0:
+    raise ValueError("エラー: 環境変数 'HF_TOKEN' が設定されていません。RailwayのVariablesタブで 'HF_TOKEN' を設定してください。")
 
 # ALLOWED_CHANNEL_ID を数値（int）に安全に変換
 if ALLOWED_CHANNEL_ID:
@@ -35,48 +40,46 @@ intents.message_content = True  # メッセージ内容の取得を許可
 client = discord.Client(intents=intents)
 
 # --------------------------------------------------
-# 3. Hugging Face API 呼び出し関数（最新 Router API 対応）
+# 3. Hugging Face API 呼び出し関数
 # --------------------------------------------------
 def query_huggingface(prompt):
-    # 最新の Hugging Face Router API エンドポイント
-    API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
+    API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
     
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {HF_TOKEN.strip()}"
     }
-    if HF_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"
     
-    # 無料枠で安定して動作する日本語対応モデル（Qwen2.5-72B-Instruct）
+    full_prompt = f"システム: あなたは親切で賢いアシスタント「モーガン先生」です。日本語で丁寧に回答してください。\nユーザー: {prompt}\nアシスタント:"
+    
     payload = {
-        "model": "Qwen/Qwen2.5-72B-Instruct",
-        "messages": [
-            {
-                "role": "system",
-                "content": "あなたは親切で賢いアシスタント「モーガン先生」です。日本語で丁寧に分かりやすく回答してください。"
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "max_tokens": 512,
-        "temperature": 0.7
+        "inputs": full_prompt,
+        "parameters": {
+            "max_new_tokens": 256,
+            "temperature": 0.7,
+            "return_full_text": False
+        },
+        "options": {
+            "wait_for_model": True
+        }
     }
     
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
         
         if response.status_code == 200:
             result = response.json()
-            # OpenAI互換形式のレスポンス解析
-            if "choices" in result and len(result["choices"]) > 0:
-                message_obj = result["choices"][0].get("message", {})
-                return message_obj.get("content", "返答本文が空でした。").strip()
+            if isinstance(result, list) and len(result) > 0:
+                text = result[0].get("generated_text", "")
+                return text.strip() if text else "返答が空でした。"
+            elif isinstance(result, dict) and "generated_text" in result:
+                return result["generated_text"].strip()
             return "レスポンスの解析に失敗しました。"
         else:
-            print(f"[API Error Details]: {response.status_code} - {response.text}")
-            return f"申し訳ありません、APIエラーが発生しました（コード: {response.status_code}）。"
+            err_detail = response.text[:300]
+            print(f"[API Error Status]: {response.status_code}")
+            print(f"[API Error Detail]: {response.text}")
+            return f"APIエラー（コード: {response.status_code}）\n詳細: `{err_detail}`"
             
     except Exception as e:
         print(f"[Connection Error]: {e}")
