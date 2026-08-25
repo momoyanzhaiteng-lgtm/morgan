@@ -47,9 +47,9 @@ def query_huggingface(prompt):
     if HF_TOKEN:
         headers["Authorization"] = f"Bearer {HF_TOKEN}"
     
-    # OpenAI チャット形式のペイロード構造
+    # 無料枠で安定して動作する日本語対応モデル（Qwen2.5-72B-Instruct）
     payload = {
-        "model": "mistralai/Mistral-7B-Instruct-v0.3",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "messages": [
             {
                 "role": "system",
