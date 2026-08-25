@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 # --------------------------------------------------
 load_dotenv()
 
-# os.getenv と os.environ.get の両方で確実に取得
 TOKEN = os.getenv("TOKEN") or os.environ.get("TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN") or os.environ.get("HF_TOKEN")
 ALLOWED_CHANNEL_ID = os.getenv("ALLOWED_CHANNEL_ID") or os.environ.get("ALLOWED_CHANNEL_ID")
@@ -32,27 +31,37 @@ if ALLOWED_CHANNEL_ID:
 import discord
 
 intents = discord.Intents.default()
-intents.message_content = True  # メッセージ内容の取得を許可（Discord Developer PortalでもONが必要）
+intents.message_content = True  # メッセージ内容の取得を許可
 client = discord.Client(intents=intents)
 
 # --------------------------------------------------
-# 3. Hugging Face API 呼び出し関数
+# 3. Hugging Face API 呼び出し関数（最新 Router API 対応）
 # --------------------------------------------------
 def query_huggingface(prompt):
-    # 最新の推論APIエンドポイント（Mistral-7B-Instruct-v0.3）
-    API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+    # 最新の Hugging Face Router API エンドポイント
+    API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
     
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json"
+    }
     if HF_TOKEN:
         headers["Authorization"] = f"Bearer {HF_TOKEN}"
     
+    # OpenAI チャット形式のペイロード構造
     payload = {
-        "inputs": f"<s>[INST] あなたは親切で賢いアシスタント「モーガン先生」です。日本語で丁寧に答えてください。\n\n質問: {prompt} [/INST]",
-        "parameters": {
-            "max_new_tokens": 512,
-            "temperature": 0.7,
-            "return_full_text": False
-        }
+        "model": "mistralai/Mistral-7B-Instruct-v0.3",
+        "messages": [
+            {
+                "role": "system",
+                "content": "あなたは親切で賢いアシスタント「モーガン先生」です。日本語で丁寧に分かりやすく回答してください。"
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": 512,
+        "temperature": 0.7
     }
     
     try:
@@ -60,10 +69,10 @@ def query_huggingface(prompt):
         
         if response.status_code == 200:
             result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                return result[0].get("generated_text", "返答の生成に失敗しました。")
-            elif isinstance(result, dict) and "generated_text" in result:
-                return result["generated_text"]
+            # OpenAI互換形式のレスポンス解析
+            if "choices" in result and len(result["choices"]) > 0:
+                message_obj = result["choices"][0].get("message", {})
+                return message_obj.get("content", "返答本文が空でした。").strip()
             return "レスポンスの解析に失敗しました。"
         else:
             print(f"[API Error Details]: {response.status_code} - {response.text}")
@@ -99,7 +108,7 @@ async def on_message(message):
     async with message.channel.typing():
         reply = query_huggingface(user_input)
         
-        # Discordの2000文字制限対策（超える場合は分割または省略）
+        # Discordの2000文字制限対策
         if len(reply) > 1900:
             reply = reply[:1900] + "\n...(長文のため省略されました)"
             
