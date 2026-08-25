@@ -1,6 +1,7 @@
 import os
 import requests
 from dotenv import load_dotenv
+import discord
 
 # --------------------------------------------------
 # 1. 環境変数の読み込みとチェック
@@ -33,49 +34,53 @@ if ALLOWED_CHANNEL_ID:
 # --------------------------------------------------
 # 2. Discord Client の初期化設定
 # --------------------------------------------------
-import discord
-
 intents = discord.Intents.default()
 intents.message_content = True  # メッセージ内容の取得を許可
 client = discord.Client(intents=intents)
 
 # --------------------------------------------------
-# 3. Hugging Face API 呼び出し関数
+# 3. Hugging Face API 呼び出し関数 (Router API)
 # --------------------------------------------------
 def query_huggingface(prompt):
-    API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct"
+    # 最新の Hugging Face Router API エンドポイント（DNSエラー回避用）
+    API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
     
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {HF_TOKEN.strip()}"
     }
     
-    full_prompt = f"システム: あなたは親切で賢いアシスタント「モーガン先生」です。日本語で丁寧に回答してください。\nユーザー: {prompt}\nアシスタント:"
-    
+    # Router API (OpenAI互換) 用のチャット形式ペイロード
+    # 安定かつ日本語に強い Qwen2.5-7B-Instruct を指定
     payload = {
-        "inputs": full_prompt,
-        "parameters": {
-            "max_new_tokens": 256,
-            "temperature": 0.7,
-            "return_full_text": False
-        },
-        "options": {
-            "wait_for_model": True
-        }
+        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "messages": [
+            {
+                "role": "system",
+                "content": "あなたは親切で賢いアシスタント「モーガン先生」です。日本語で丁寧に回答してください。"
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": 512,
+        "temperature": 0.7
     }
     
     try:
+        # タイムアウトを40秒に設定
         response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
         
         if response.status_code == 200:
             result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                text = result[0].get("generated_text", "")
-                return text.strip() if text else "返答が空でした。"
-            elif isinstance(result, dict) and "generated_text" in result:
-                return result["generated_text"].strip()
+            # OpenAI互換レスポンスの解析
+            if "choices" in result and len(result["choices"]) > 0:
+                message_obj = result["choices"][0].get("message", {})
+                return message_obj.get("content", "返答本文が空でした。").strip()
             return "レスポンスの解析に失敗しました。"
         else:
+            # エラーの詳細をログに出力し、Discordにも返す
             err_detail = response.text[:300]
             print(f"[API Error Status]: {response.status_code}")
             print(f"[API Error Detail]: {response.text}")
