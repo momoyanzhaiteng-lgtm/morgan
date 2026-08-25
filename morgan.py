@@ -42,7 +42,7 @@ client = discord.Client(intents=intents)
 # 3. Hugging Face API 呼び出し関数 (Router API)
 # --------------------------------------------------
 def query_huggingface(prompt):
-    # 最新の Hugging Face Router API エンドポイント（DNSエラー回避用）
+    # 最新の Hugging Face Router API エンドポイント
     API_URL = "https://router.huggingface.co/hf-inference/v1/chat/completions"
     
     headers = {
@@ -50,10 +50,9 @@ def query_huggingface(prompt):
         "Authorization": f"Bearer {HF_TOKEN.strip()}"
     }
     
-    # Router API (OpenAI互換) 用のチャット形式ペイロード
-    # 安定かつ日本語に強い Qwen2.5-7B-Instruct を指定
+    # 現在無料枠（hf-inference）で安定稼働している高スペックモデルを指定
     payload = {
-        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
         "messages": [
             {
                 "role": "system",
@@ -69,18 +68,15 @@ def query_huggingface(prompt):
     }
     
     try:
-        # タイムアウトを40秒に設定
         response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
         
         if response.status_code == 200:
             result = response.json()
-            # OpenAI互換レスポンスの解析
             if "choices" in result and len(result["choices"]) > 0:
                 message_obj = result["choices"][0].get("message", {})
                 return message_obj.get("content", "返答本文が空でした。").strip()
             return "レスポンスの解析に失敗しました。"
         else:
-            # エラーの詳細をログに出力し、Discordにも返す
             err_detail = response.text[:300]
             print(f"[API Error Status]: {response.status_code}")
             print(f"[API Error Detail]: {response.text}")
