@@ -1,6 +1,7 @@
 import os
 import re
 import asyncio
+import unicodedata
 import discord
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
@@ -66,24 +67,31 @@ def load_knowledge_base() -> str:
     return ""
 
 # --------------------------------------------------
-# 6. 絵文字・特殊記号判定関数
+# 6. 絵文字・特殊記号判定関数（unicodedata版）
 # --------------------------------------------------
 def is_only_emoji(text: str) -> bool:
     """
     文章が絵文字・カスタム絵文字・空白のみで構成されているかを判定します。
     """
-    # Discordカスタム絵文字 (<:name:id> や <a:name:id>) を除去
-    text_no_custom = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", "", text)
+    # 1. Discordカスタム絵文字 (<:name:id> や <a:name:id>) を除去
+    text_cleaned = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", "", text)
     
-    # Unicode絵文字、異体字セレクタ、結合用文字、空白を除去
-    emoji_pattern = re.compile(
-        r"[\s\u200d\ufe0f\u2000-\u200f\u2600-\u27bf]|\p{Extended_Pictographic}", 
-        re.UNICODE
-    )
-    remaining_text = emoji_pattern.sub("", text_no_custom)
+    # 2. 空白・改行・制御記号・ゼロ幅結合子などを除去
+    text_cleaned = re.sub(r"[\s\u200d\ufe0f\u2000-\u200f\u2600-\u27bf]+", "", text_cleaned)
     
-    # 全て除去されて空文字になった場合は「絵文字のみ」と判定
-    return len(remaining_text) == 0
+    if not text_cleaned:
+        return True
+
+    # 3. 残った文字がすべて Unicode の記号・絵文字カテゴリか判定
+    for char in text_cleaned:
+        category = unicodedata.category(char)
+        # So: その他の記号 (絵文字の多く)
+        # Sk: 記号 (Modifierなど)
+        # Sm: 数学記号 (一部の絵文字)
+        if category not in ("So", "Sk", "Sm"):
+            return False  # ひらがな・カタカナ・漢字・英数字などが含まれていれば False
+
+    return True
 
 # --------------------------------------------------
 # 7. モード判定 & AI（モーガン先生）の思考・回答関数
