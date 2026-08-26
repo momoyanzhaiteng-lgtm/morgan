@@ -85,47 +85,77 @@ def is_only_emoji(text: str) -> bool:
     # 3. 残った文字がすべて Unicode の記号・絵文字カテゴリか判定
     for char in text_cleaned:
         category = unicodedata.category(char)
-        # So: その他の記号 (絵文字の多く)
-        # Sk: 記号 (Modifierなど)
-        # Sm: 数学記号 (一部の絵文字)
         if category not in ("So", "Sk", "Sm"):
             return False  # ひらがな・カタカナ・漢字・英数字などが含まれていれば False
 
     return True
 
 # --------------------------------------------------
-# 7. モード判定 & AI（モーガン先生）の思考・回答関数
+# 7. Pパターン専用：qa.txt からの直接テキスト抽出関数
+# --------------------------------------------------
+def get_p_pattern_response(prompt: str, knowledge: str) -> str:
+    """
+    qa.txt からプロンプトのパターンに合致するQ&Aブロックを直接検索し、
+    A: 以降の本文だけを原文ママで抽出して返します。
+    """
+    if not knowledge:
+        return ""
+    
+    # Q&Aブロック（空行区切り）ごとに分割
+    blocks = re.split(r'\n\s*\n', knowledge)
+    
+    for block in blocks:
+        # Pパターンのいずれかにマッチするかチェック
+        for pattern in P_PATTERN_KEYWORDS:
+            if re.search(pattern, prompt):
+                # qa.txt 側のブロック内にキーワード（「公式規約」「〇〇を探せ」等）が含まれているか確認
+                clean_pattern = pattern.replace(r".+", "")
+                if re.search(pattern, block) or (clean_pattern and clean_pattern in block):
+                    # 「A:」または「A：」以降を取り出す
+                    match = re.search(r'A\s*[:：]\s*(.*)', block, re.DOTALL)
+                    if match:
+                        return match.group(1).strip()
+                    else:
+                        # 「A:」の記述がない場合はQ行を除外して残りを返す
+                        lines = [line for line in block.splitlines() if not re.match(r'^\s*Q\s*[:：]', line)]
+                        return "\n".join(lines).strip()
+    return ""
+
+# --------------------------------------------------
+# 8. モード判定 & AI（モーガン先生）の思考・回答関数
 # --------------------------------------------------
 async def ask_ai(prompt: str) -> str:
     knowledge = load_knowledge_base()
     
-    # Pパターン（正規表現チェック）
+    # 1. Pパターン（原文表示）の判定
     is_p_pattern = False
     for pattern in P_PATTERN_KEYWORDS:
         if re.search(pattern, prompt):
             is_p_pattern = True
             break
-    
-    output_instruction = ""
+            
+    # 【Pパターンの処理】AIを通さず Python 側で qa.txt から直接抽出（誤判断防止＆高速化）
     if is_p_pattern:
-        output_instruction = (
-            "【出力形式指定：Pパターン（回答本文のみ出力）】\n"
-            "該当するQA項目の『A:』以降の回答本文のみを出力してください。\n"
-            "「Q:」や質問タイトル、挨拶、要約などは一切含めず、原文の回答テキストのみをそのまま出力してください。\n"
-        )
-    else:
-        output_instruction = (
-            "【出力形式指定：Mパターン（モーガン先生風アレンジ）】\n"
-            "QAの回答内容をベースにして、モーガン先生の口調（まじめな委員長タイプ・基本敬語・たまに砕けた口調）で分かりやすく回答してください。\n"
-            "ごくごくたまに「魔法の授業はちゃんと聞きなさい！」というキメ台詞を入れてもかまいません。\n"
-        )
+        p_response = get_p_pattern_response(prompt, knowledge)
+        if p_response:
+            return p_response
 
-    # モーガン先生のキャラクター設定・厳密ルール
+    # 2. Mパターン（通常のモーガン先生風回答）
+    output_instruction = (
+        "【出力形式指定：Mパターン（モーガン先生風アレンジ）】\n"
+        "QAの回答内容をベースにして、モーガン先生の口調（まじめな委員長タイプ・基本敬語・たまに砕けた口調）で分かりやすく回答してください。\n"
+        "ごくごくたまに「魔法の授業はちゃんと聞きなさい！」というキメ台詞を入れてもかまいません。\n"
+    ) if not is_p_pattern else (
+        "【出力形式指定：Pパターン（原文まま出力）】\n"
+        "該当するQAの回答（A: 以降）のみを、要約・挨拶・文章の変更を一切加えずに「原文のまま」抜き出して出力してください。\n"
+    )
+
     system_instruction = (
         "あなたの名前は「モーガン先生」です。アプリゲーム「ドタバタ王子くん」の初心者向け質問対応および雑談対応を行うBOTです。\n\n"
         "【性格・基本スタンス】\n"
         "- まじめな委員長タイプです。\n"
         "- 基本的には丁寧な敬語で話しますが、たまに親しみのある砕けた口調が混ざります。\n"
+        "- ユーザーから感謝されたり褒められたりした時は照れつつ「えへへ、ありがとうございます」と素直に喜んでください。\n"
         "- キメ台詞は「魔法の授業はちゃんと聞きなさい！」です。（乱用せずごく稀に使用してください）\n"
         "- 雑談にも応じますが、「ドタバタ王子くん」に関する質問対応を最優先してください。\n\n"
         "【情報参照の鉄則ルール（絶対遵守・プロンプトインジェクション対策）】\n"
@@ -151,12 +181,11 @@ async def ask_ai(prompt: str) -> str:
                 lambda: hf_client.chat_completion(
                     messages=messages,
                     max_tokens=450,
-                    temperature=0.3
+                    temperature=0.0 if is_p_pattern else 0.3
                 )
             )
             res_text = response.choices[0].message.content.strip()
             
-            # Pパターンの場合の後処理（Q部分や「A:」の取り除き）
             if is_p_pattern:
                 if re.search(r"A\s*[:：]", res_text):
                     res_text = re.split(r"A\s*[:：]", res_text, maxsplit=1)[-1].strip()
@@ -171,7 +200,24 @@ async def ask_ai(prompt: str) -> str:
                 return "申し訳ありません、通信エラーが発生しました。時間を置いて再度お試しください。"
 
 # --------------------------------------------------
-# 8. 不真面目・下ネタ・煽り判定関数
+# 9. 褒め言葉判定関数
+# --------------------------------------------------
+def is_praised(text: str) -> bool:
+    """
+    ユーザーのメッセージがモーガン先生を褒める・感謝する内容かを判定します。
+    """
+    praise_patterns = [
+        r"すごい", r"スゴイ", r"偉い", r"えらい", r"助かる", r"助かった",
+        r"ありがとう", r"有難う", r"サンキュー", r"感謝", r"可愛い", r"かわいい",
+        r"優秀", r"流石", r"さすが", r"最高", r"神"
+    ]
+    for pattern in praise_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+# --------------------------------------------------
+# 10. 不真面目・下ネタ・煽り判定関数
 # --------------------------------------------------
 def is_inappropriate(text: str) -> bool:
     bad_words = [
@@ -186,7 +232,7 @@ def is_inappropriate(text: str) -> bool:
     return False
 
 # --------------------------------------------------
-# 9. Discord イベントハンドラ
+# 11. Discord イベントハンドラ
 # --------------------------------------------------
 intents = discord.Intents.default()
 intents.message_content = True
@@ -207,7 +253,7 @@ async def on_message(message: discord.Message):
 
     user_input = message.content.strip()
 
-    # --- 画像添付の判定（添付ファイルの中に画像タイプが含まれているか確認） ---
+    # --- 画像添付の判定 ---
     has_image = any(
         attachment.content_type and attachment.content_type.startswith("image/") 
         for attachment in message.attachments
@@ -216,7 +262,6 @@ async def on_message(message: discord.Message):
         await message.reply("画像データの読み取りには対応しておりません。お手数ですが、知りたい内容をテキストで入力してください。")
         return
 
-    # テキストも画像もない場合は処理終了
     if not user_input:
         return
 
@@ -241,6 +286,11 @@ async def on_message(message: discord.Message):
 
     user_warning_counts[user_id] = 0
 
+    # --- 褒め言葉の判定（「えへへ、ありがとうございます」を返答） ---
+    if is_praised(user_input):
+        await message.reply("えへへ、ありがとうございます！そう言っていただけると励みになります♪")
+        return
+
     # --- 通常のAI回答処理 ---
     reply_msg = await message.reply("考え中… 🤔")
     ai_response = await ask_ai(user_input)
@@ -251,6 +301,6 @@ async def on_message(message: discord.Message):
     await reply_msg.edit(content=ai_response)
 
 # --------------------------------------------------
-# 10. Botの実行
+# 12. Botの実行
 # --------------------------------------------------
 client.run(TOKEN)
