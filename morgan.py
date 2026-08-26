@@ -1,4 +1,5 @@
-import os
+@tengmomoyanimport os
+import re
 import asyncio
 import discord
 from dotenv import load_dotenv
@@ -34,7 +35,27 @@ hf_client = InferenceClient(
 )
 
 # --------------------------------------------------
-# 3. 知識ベース（qa.txt）の読み込み関数
+# 3. ユーザーごとの不真面目警告カウンター管理
+# --------------------------------------------------
+user_warning_counts = {}
+
+# --------------------------------------------------
+# 4. パターン管理 & イベント吸収用の設定定義
+# --------------------------------------------------
+
+# 【Pパターン指定設定（原文そのまま表示したいキーワード・正規表現）】
+P_PATTERN_KEYWORDS = [
+    "公式規約",
+    "お問い合わせ窓口",
+    r".+を探せ",       # 「〇〇を探せ」系はすべて原文ママ表示
+    r".+討伐イベント", # 「〇〇討伐イベント」系はすべて原文ママ表示
+    # --------------------------------------------------
+    # ※ほかにも追記する場合はここに追加する（Pパターン用キーワード）
+    # --------------------------------------------------
+]
+
+# --------------------------------------------------
+# 5. 知識ベース（qa.txt）の読み込み関数
 # --------------------------------------------------
 def load_knowledge_base() -> str:
     file_path = "qa.txt"
@@ -48,32 +69,46 @@ def load_knowledge_base() -> str:
     return ""
 
 # --------------------------------------------------
-# 4. AI（モーガン先生）の思考・回答関数
+# 6. モード判定 & AI（モーガン先生）の思考・回答関数
 # --------------------------------------------------
 async def ask_ai(prompt: str) -> str:
     knowledge = load_knowledge_base()
     
-    # QAデータの準備状態を判定
-    if knowledge:
-        qa_status_prompt = f"【公式QAデータベース】\n{knowledge}"
+    # Pパターン（正規表現チェック）
+    is_p_pattern = False
+    for pattern in P_PATTERN_KEYWORDS:
+        if re.search(pattern, prompt):
+            is_p_pattern = True
+            break
+    
+    output_instruction = ""
+    if is_p_pattern:
+        output_instruction = (
+            "【出力形式指定：Pパターン（原文まま）】\n"
+            "該当するQAの回答（A部分）の文面を改変せず、そのまま出力してください。\n"
+        )
     else:
-        qa_status_prompt = "【公式QAデータベース】\n（現在QAは準備中・未登録の状態です）"
+        output_instruction = (
+            "【出力形式指定：Mパターン（モーガン先生風アレンジ）】\n"
+            "QAの回答内容をベースにして、モーガン先生の口調（まじめな委員長タイプ・基本敬語・たまに砕けた口調）で分かりやすく回答してください。\n"
+            "ごくごくたまに「魔法の授業はちゃんと聞きなさい！」というキメ台詞を入れてもかまいません。\n"
+        )
 
-    # モーガン先生のキャラクター設定・応答ルール
+    # モーガン先生のキャラクター設定・厳密ルール
     system_instruction = (
-        "あなたの名前は「モーガン先生」です。Discordの特定チャンネルでユーザーの質問や雑談に応じるBOTです。\n\n"
+        "あなたの名前は「モーガン先生」です。アプリゲーム「ドタバタ王子くん」の初心者向け質問対応および雑談対応を行うBOTです。\n\n"
         "【性格・基本スタンス】\n"
-        "- 性格は真面目な委員長タイプです。\n"
-        "- 基本的には丁寧な敬語（〜です、〜ます）で話しますが、感情が高ぶった際やふとした瞬間に、たまに砕けた口調（〜だよ、〜じゃない？等）が混ざります。\n"
-        "- 口癖は「魔法の授業はちゃんとうけなさい！」です。挨拶や雑談の合間など、適したタイミングで自然に使ってください。\n\n"
-        "【応答ルール】\n"
-        "1. 雑談・日常会話には、親切かつ真面目に応じつつ雑談に付き合ってください。\n"
-        "2. ふざけた質問、不真面目な問いかけ、煽りに対しては、一言「真面目にやりなさい」とだけ厳しく返答・一蹴してください。\n"
-        "3. 公式QAデータベースに関する質問や具体的な確認事項について：\n"
-        "   - 現在QAが準備中の場合は、「ただいまQAができるまで準備中となっております。今しばらくお待ちくださいね」といった案内を含めて回答してください。\n"
-        "   - QAに記載がない質問や答えられない質問については、絶対に類推・推測・捏造して答えてはいけません。\n"
-        "   - QAに記載のない質問への回答は、正確に「次までに答えを準備しておきますね。次も答えがない場合はQAリクエストにリクエストを送ってください」と答えてください。\n\n"
-        f"{qa_status_prompt}"
+        "- まじめな委員長タイプです。\n"
+        "- 基本的には丁寧な敬語で話しますが、たまに親しみのある砕けた口調が混ざります。\n"
+        "- キメ台詞は「魔法の授業はちゃんと聞きなさい！」です。（乱用せずごく稀に使用してください）\n"
+        "- 雑談にも応じますが、「ドタバタ王子くん」に関する質問対応を最優先してください。\n\n"
+        "【回答ルール（絶対遵守）】\n"
+        "1. 「【公式QAデータベース】」の内容を参照して回答してください。\n"
+        "2. 「〇〇を探せ」など名称が変わる繰り返しイベントについては、名称が異なっていても「〇〇を探せ」系のQA情報を適用して回答してください。\n"
+        "3. QAデータベース内に該当する回答がない場合、絶対に勝手に類推・推測・捏造してはいけません。\n"
+        "4. QAに記載がない事項に関しては、正確に「ちょっとわかりません、QAリクエストから調査依頼をしてください」とだけ回答してください。\n\n"
+        f"{output_instruction}\n"
+        f"【公式QAデータベース】\n{knowledge if knowledge else '（QA未登録）'}"
     )
 
     messages = [
@@ -88,8 +123,8 @@ async def ask_ai(prompt: str) -> str:
                 None,
                 lambda: hf_client.chat_completion(
                     messages=messages,
-                    max_tokens=400,
-                    temperature=0.6
+                    max_tokens=450,
+                    temperature=0.5
                 )
             )
             return response.choices[0].message.content.strip()
@@ -101,7 +136,25 @@ async def ask_ai(prompt: str) -> str:
                 return "申し訳ありません、通信エラーが発生しました。時間を置いて再度お試しください。"
 
 # --------------------------------------------------
-# 5. Discord イベントハンドラ
+# 7. 不真面目・下ネタ・煽り判定関数
+# --------------------------------------------------
+def is_inappropriate(text: str) -> bool:
+    bad_words = [
+        r"死ね", r"バカ", r"アホ", r"うざ", r"きも", r"雑魚", r"カス",
+        r"ちんこ", r"まんこ", r"おっぱい", r"セキュ", r"エロ", r"SEX", r"sex",
+        r"ふざけ", r"煽り", r"ばか"
+    ]
+    # --------------------------------------------------
+    # ※ほかにも追記する場合はここに追加する（不真面目・NGワード）
+    # --------------------------------------------------
+    
+    for word in bad_words:
+        if re.search(word, text, re.IGNORECASE):
+            return True
+    return False
+
+# --------------------------------------------------
+# 8. Discord イベントハンドラ
 # --------------------------------------------------
 intents = discord.Intents.default()
 intents.message_content = True
@@ -110,15 +163,13 @@ client = discord.Client(intents=intents)
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
-    print("モーガン先生（委員長モード）が正常に起動・オンラインになりました！")
+    print("モーガン先生（ドタバタ王子くん初心者案内モード）が起動しました！")
 
 @client.event
 async def on_message(message: discord.Message):
-    # Bot自身の発言は無視
     if message.author == client.user:
         return
 
-    # 指定したチャンネル以外は無視
     if ALLOWED_CHANNEL_IDS and message.channel.id not in ALLOWED_CHANNEL_IDS:
         return
 
@@ -126,17 +177,32 @@ async def on_message(message: discord.Message):
     if not user_input:
         return
 
-    # AI回答処理（考え中表示から更新）
+    user_id = message.author.id
+
+    # --- A. 不真面目・下ネタ・煽り・罵詈雑言の判定 ---
+    if is_inappropriate(user_input):
+        current_count = user_warning_counts.get(user_id, 0) + 1
+        user_warning_counts[user_id] = current_count
+        
+        if current_count >= 3:
+            user_warning_counts[user_id] = 0
+            await message.reply("@tengmomoyan")
+        else:
+            await message.reply("真面目にやりなさい")
+        return
+
+    user_warning_counts[user_id] = 0
+
+    # --- B. 通常のAI回答処理 ---
     reply_msg = await message.reply("考え中… 🤔")
     ai_response = await ask_ai(user_input)
     
-    # Discordの2000文字制限対策
     if len(ai_response) > 1900:
         ai_response = ai_response[:1900] + "\n...(長文のため省略されました)"
         
     await reply_msg.edit(content=ai_response)
 
 # --------------------------------------------------
-# 6. Botの実行
+# 9. Botの実行
 # --------------------------------------------------
 client.run(TOKEN)
