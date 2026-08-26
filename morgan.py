@@ -82,11 +82,13 @@ async def ask_ai(prompt: str) -> str:
             break
     
     output_instruction = ""
-    if is_p_pattern:
+   if is_p_pattern:
         output_instruction = (
-            "【出力形式指定：Pパターン（原文まま）】\n"
-            "該当するQAの回答（A部分）の文面を改変せず、そのまま出力してください。\n"
+            "【出力形式指定：Pパターン（回答のみ原文まま）】\n"
+            "該当するQA項目の『A:』以降の回答テキストのみを、一切の改変や要約・挨拶・Q（質問文）の表示をせず、そのまま出力してください。\n"
+            "「Q:」や質問タイトルは出力に含めないでください。\n"
         )
+
     else:
         output_instruction = (
             "【出力形式指定：Mパターン（モーガン先生風アレンジ）】\n"
