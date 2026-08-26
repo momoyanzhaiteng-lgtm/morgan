@@ -82,13 +82,12 @@ async def ask_ai(prompt: str) -> str:
             break
     
     output_instruction = ""
-   if is_p_pattern:
+    if is_p_pattern:
         output_instruction = (
             "【出力形式指定：Pパターン（回答のみ原文まま）】\n"
             "該当するQA項目の『A:』以降の回答テキストのみを、一切の改変や要約・挨拶・Q（質問文）の表示をせず、そのまま出力してください。\n"
-            "「Q:」や質問タイトルは出力に含めないでください。\n"
+            "「Q:」や質問タイトルは絶対に出力に含めないでください。\n"
         )
-
     else:
         output_instruction = (
             "【出力形式指定：Mパターン（モーガン先生風アレンジ）】\n"
@@ -101,7 +100,7 @@ async def ask_ai(prompt: str) -> str:
         "あなたの名前は「モーガン先生」です。アプリゲーム「ドタバタ王子くん」の初心者向け質問対応および雑談対応を行うBOTです。\n\n"
         "【性格・基本スタンス】\n"
         "- まじめな委員長タイプです。\n"
-        "- 基本的には丁寧な敬語で話しますが、たまに親しみのある砕けた口調が混ざります。\n"
+        "- 基本的には丁寧な敬語で話しますが、たまに親しみのある砕けた口調が混ざります。自然な日本語で話してください\n"
         "- キメ台詞は「魔法の授業はちゃんと聞きなさい！」です。（乱用せずごく稀に使用してください）\n"
         "- 雑談にも応じますが、「ドタバタ王子くん」に関する質問対応を最優先してください。\n\n"
         "【対応不可事項（重要）】\n"
@@ -133,7 +132,13 @@ async def ask_ai(prompt: str) -> str:
                     temperature=0.5
                 )
             )
-            return response.choices[0].message.content.strip()
+            res_text = response.choices[0].message.content.strip()
+            
+            # Pパターンの場合、文頭に「A:」や「A：」が混ざっていたら自動で取り除く後処理
+            if is_p_pattern:
+                res_text = re.sub(r"^A\s*[:：]\s*", "", res_text)
+                
+            return res_text
         except Exception as e:
             print(f"[AI Error Attempt {attempt + 1}]: {e}")
             if attempt == 0:
