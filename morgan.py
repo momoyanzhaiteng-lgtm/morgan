@@ -224,7 +224,7 @@ def is_praised(text: str) -> bool:
 # --------------------------------------------------
 def is_inappropriate(text: str) -> bool:
     bad_words = [
-        r"死ね", r"バカ", r"アホ", r"うざ", r"きも", r"雑魚", r"カス",
+        r"死ね", r"バカ", r"アホ", r"うざ", r"雑魚", r"カス",
         r"ちんこ", r"まんこ", r"おっぱい", r"セキュ", r"エロ", r"SEX", r"sex",
         r"ふざけ", r"煽り", r"ばか"
     ]
