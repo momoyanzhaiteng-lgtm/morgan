@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import asyncio
@@ -48,8 +49,8 @@ user_warning_counts = {}
 
 # 【Pパターン指定設定（原文そのまま表示したいキーワード・正規表現）】
 P_PATTERN_KEYWORDS = [
-    "公式規約",
-    "お問い合わせ窓口",
+    "デイリータスク",
+    "日課",
     r".+を探せ",        # 「〇〇を探せ」系はすべて原文ママ表示
     r".+討伐イベント",  # 「〇〇討伐イベント」系はすべて原文ママ表示
 ]
@@ -182,7 +183,7 @@ async def ask_ai(prompt: str) -> str:
                 None,
                 lambda: hf_client.chat_completion(
                     messages=messages,
-                    max_tokens=450,
+                    max_tokens=1000,
                     temperature=0.0 if is_p_pattern else 0.3
                 )
             )
@@ -210,7 +211,7 @@ def is_praised(text: str) -> bool:
     """
     praise_patterns = [
         r"すごい", r"スゴイ", r"偉い", r"えらい", r"助かる", r"助かった",
-        r"有難う", r"サンキュー", r"感謝", r"可愛い", r"かわいい",
+        r"可愛い", r"かわいい",
         r"優秀", r"流石", r"さすが", r"最高", r"神"
     ]
     for pattern in praise_patterns:
@@ -300,10 +301,21 @@ async def on_message(message: discord.Message):
     reply_msg = await message.reply("考え中… 🤔")
     ai_response = await ask_ai(user_input)
     
-    if len(ai_response) > 1900:
-        ai_response = ai_response[:1900] + "\n...(長文のため省略されました)"
+    # 閾値の設定（1500文字を超える場合はファイル化して送信）
+    FILE_THRESHOLD = 1500
+
+    if len(ai_response) <= FILE_THRESHOLD:
+        # 1500文字以内の場合はそのままテキストで送信
+        await reply_msg.edit(content=ai_response)
+    else:
+        # 1500文字を超える場合は .txt ファイル化して送信
+        file_data = io.BytesIO(ai_response.encode('utf-8'))
+        discord_file = discord.File(fp=file_data, filename="response.txt")
         
-    await reply_msg.edit(content=ai_response)
+        await reply_msg.edit(
+            content="回答が長文となったため、テキストファイルにまとめました 📄",
+            attachments=[discord_file]
+        )
 
 # --------------------------------------------------
 # 12. Botの実行
