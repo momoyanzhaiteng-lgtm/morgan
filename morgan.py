@@ -13,9 +13,11 @@ load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "").strip()
 
 print(f"--- [DEBUG] TOKEN Detected: {bool(TOKEN)} ---")
 print(f"--- [DEBUG] HF_TOKEN Detected: {bool(HF_TOKEN)} ---")
+print(f"--- [DEBUG] ADMIN_USER_ID Detected: {bool(ADMIN_USER_ID)} ---")
 
 if not TOKEN:
     raise ValueError("エラー: 環境変数 'TOKEN' が設定されていません。RailwayのVariablesタブで設定してください。")
@@ -48,8 +50,8 @@ user_warning_counts = {}
 P_PATTERN_KEYWORDS = [
     "公式規約",
     "お問い合わせ窓口",
-    r".+を探せ",       # 「〇〇を探せ」系はすべて原文ママ表示
-    r".+討伐イベント", # 「〇〇討伐イベント」系はすべて原文ママ表示
+    r".+を探せ",        # 「〇〇を探せ」系はすべて原文ママ表示
+    r".+討伐イベント",  # 「〇〇討伐イベント」系はすべて原文ママ表示
 ]
 
 # --------------------------------------------------
@@ -208,7 +210,7 @@ def is_praised(text: str) -> bool:
     """
     praise_patterns = [
         r"すごい", r"スゴイ", r"偉い", r"えらい", r"助かる", r"助かった",
-        r"ありがとう", r"有難う", r"サンキュー", r"感謝", r"可愛い", r"かわいい",
+        r"有難う", r"サンキュー", r"感謝", r"可愛い", r"かわいい",
         r"優秀", r"流石", r"さすが", r"最高", r"神"
     ]
     for pattern in praise_patterns:
@@ -279,7 +281,10 @@ async def on_message(message: discord.Message):
         
         if current_count >= 3:
             user_warning_counts[user_id] = 0
-            await message.reply("@tengmomoyan")
+            if ADMIN_USER_ID:
+                await message.reply(f"<@{ADMIN_USER_ID}> 管理者へ不適切発言を報告しました。")
+            else:
+                await message.reply("@tengmomoyan (※ADMIN_USER_ID未設定)")
         else:
             await message.reply("真面目にやりなさい")
         return
