@@ -210,9 +210,9 @@ def is_praised(text: str) -> bool:
     ユーザーのメッセージがモーガン先生を褒める・感謝する内容かを判定します。
     """
     praise_patterns = [
-        r"すごい", r"スゴイ", r"偉い", r"えらい", r"助かる", r"助かった",
+        r"すごい", r"スゴイ", r"偉い", r"えらい", r"助かった",
         r"可愛い", r"かわいい",
-        r"優秀", r"流石", r"さすが", r"最高", r"神"
+        r"優秀", r"流石", r"さすが", r"最高", 
     ]
     for pattern in praise_patterns:
         if re.search(pattern, text, re.IGNORECASE):
