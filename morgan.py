@@ -5,7 +5,8 @@ import asyncio
 import unicodedata
 import discord
 from dotenv import load_dotenv
-from huggingface_hub import InferenceClient
+from google import genai
+from google.genai import types
 
 # --------------------------------------------------
 # 1. 環境変数の読み込みと起動時チェック
@@ -13,30 +14,27 @@ from huggingface_hub import InferenceClient
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
-HF_TOKEN = os.getenv("HF_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID", "").strip()
 
 print(f"--- [DEBUG] TOKEN Detected: {bool(TOKEN)} ---")
-print(f"--- [DEBUG] HF_TOKEN Detected: {bool(HF_TOKEN)} ---")
+print(f"--- [DEBUG] GEMINI_API_KEY Detected: {bool(GEMINI_API_KEY)} ---")
 print(f"--- [DEBUG] ADMIN_USER_ID Detected: {bool(ADMIN_USER_ID)} ---")
 
 if not TOKEN:
     raise ValueError("エラー: 環境変数 'TOKEN' が設定されていません。RailwayのVariablesタブで設定してください。")
 
-if not HF_TOKEN or len(HF_TOKEN.strip()) == 0:
-    raise ValueError("エラー: 環境変数 'HF_TOKEN' が設定されていません。RailwayのVariablesタブで設定してください。")
+if not GEMINI_API_KEY or len(GEMINI_API_KEY.strip()) == 0:
+    raise ValueError("エラー: 環境変数 'GEMINI_API_KEY' が設定されていません。RailwayのVariablesタブで設定してください。")
 
 # 許可チャンネルIDの読み込み（カンマ区切り対応）
 env_channels = os.getenv("ALLOWED_CHANNEL_ID", "")
 ALLOWED_CHANNEL_IDS = [int(ch_id.strip()) for ch_id in env_channels.split(",") if ch_id.strip().isdigit()]
 
 # --------------------------------------------------
-# 2. Hugging Face クライアントの初期化
+# 2. Google Gemini クライアントの初期化
 # --------------------------------------------------
-hf_client = InferenceClient(
-    model="Qwen/Qwen2.5-Coder-32B-Instruct",
-    token=HF_TOKEN.strip()
-)
+ai_client = genai.Client(api_key=GEMINI_API_KEY.strip())
 
 # --------------------------------------------------
 # 3. ユーザーごとの不真面目警告カウンター管理
@@ -46,11 +44,9 @@ user_warning_counts = {}
 # --------------------------------------------------
 # 4. パターン管理 & イベント吸収用の設定定義
 # --------------------------------------------------
-
-# 【Pパターン指定設定（原文そのまま表示したいキーワード・正規表現）】
 P_PATTERN_KEYWORDS = [
     "デイリータスク",
-    "日課",
+    "カンカン",
     r".+を探せ",        # 「〇〇を探せ」系はすべて原文ママ表示
     r".+討伐イベント",  # 「〇〇討伐イベント」系はすべて原文ママ表示
 ]
@@ -73,23 +69,16 @@ def load_knowledge_base() -> str:
 # 6. 絵文字・特殊記号判定関数（unicodedata版）
 # --------------------------------------------------
 def is_only_emoji(text: str) -> bool:
-    """
-    文章が絵文字・カスタム絵文字・空白のみで構成されているかを判定します。
-    """
-    # 1. Discordカスタム絵文字 (<:name:id> や <a:name:id>) を除去
     text_cleaned = re.sub(r"<a?:[a-zA-Z0-9_]+:\d+>", "", text)
-    
-    # 2. 空白・改行・制御記号・ゼロ幅結合子などを除去
     text_cleaned = re.sub(r"[\s\u200d\ufe0f\u2000-\u200f\u2600-\u27bf]+", "", text_cleaned)
     
     if not text_cleaned:
         return True
 
-    # 3. 残った文字がすべて Unicode の記号・絵文字カテゴリか判定
     for char in text_cleaned:
         category = unicodedata.category(char)
         if category not in ("So", "Sk", "Sm"):
-            return False  # ひらがな・カタカナ・漢字・英数字などが含まれていれば False
+            return False
 
     return True
 
@@ -97,29 +86,20 @@ def is_only_emoji(text: str) -> bool:
 # 7. Pパターン専用：qa.txt からの直接テキスト抽出関数
 # --------------------------------------------------
 def get_p_pattern_response(prompt: str, knowledge: str) -> str:
-    """
-    qa.txt からプロンプトのパターンに合致するQ&Aブロックを直接検索し、
-    A: 以降の本文だけを原文ママで抽出して返します。
-    """
     if not knowledge:
         return ""
     
-    # Q&Aブロック（空行区切り）ごとに分割
     blocks = re.split(r'\n\s*\n', knowledge)
     
     for block in blocks:
-        # Pパターンのいずれかにマッチするかチェック
         for pattern in P_PATTERN_KEYWORDS:
             if re.search(pattern, prompt):
-                # qa.txt 側のブロック内にキーワード（「公式規約」「〇〇を探せ」等）が含まれているか確認
                 clean_pattern = pattern.replace(r".+", "")
                 if re.search(pattern, block) or (clean_pattern and clean_pattern in block):
-                    # 「A:」または「A：」以降を取り出す
                     match = re.search(r'A\s*[:：]\s*(.*)', block, re.DOTALL)
                     if match:
                         return match.group(1).strip()
                     else:
-                        # 「A:」の記述がない場合はQ行を除外して残りを返す
                         lines = [line for line in block.splitlines() if not re.match(r'^\s*Q\s*[:：]', line)]
                         return "\n".join(lines).strip()
     return ""
@@ -137,7 +117,6 @@ async def ask_ai(prompt: str) -> str:
             is_p_pattern = True
             break
             
-    # 【Pパターンの処理】AIを通さず Python 側で qa.txt から直接抽出（誤判断防止＆高速化）
     if is_p_pattern:
         p_response = get_p_pattern_response(prompt, knowledge)
         if p_response:
@@ -146,7 +125,7 @@ async def ask_ai(prompt: str) -> str:
     # 2. Mパターン（通常のモーガン先生風回答）
     output_instruction = (
         "【出力形式指定：Mパターン（モーガン先生風アレンジ）】\n"
-        "QAの回答内容をベースにして、モーガン先生の口調（まじめな委員長タイプ・基本敬語・たまに砕けた口調）で分かりやすく回答してください。\n"
+        "QAの回答内容をベースにして、モーガン先生の口調（まじめな委員長タイプ・基本敬語・たまに砕けた口調）で変更を加えずに分かりやすく回答してください。\n"
         "ごくごくたまに「魔法の授業はちゃんと聞きなさい！」というキメ台詞を入れてもかまいません。\n"
     ) if not is_p_pattern else (
         "【出力形式指定：Pパターン（原文まま出力）】\n"
@@ -171,23 +150,23 @@ async def ask_ai(prompt: str) -> str:
         f"【参照データ：qa.txt】\n{knowledge if knowledge else '（qa.txt未登録）'}"
     )
 
-    messages = [
-        {"role": "system", "content": system_instruction},
-        {"role": "user", "content": prompt}
-    ]
-
     loop = asyncio.get_running_loop()
     for attempt in range(2):
         try:
+            # Gemini APIの呼び出し（モデル：gemini-2.0-flash）
             response = await loop.run_in_executor(
                 None,
-                lambda: hf_client.chat_completion(
-                    messages=messages,
-                    max_tokens=1000,
-                    temperature=0.0 if is_p_pattern else 0.3
+                lambda: ai_client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.0 if is_p_pattern else 0.3,
+                        max_output_tokens=1000,
+                    )
                 )
             )
-            res_text = response.choices[0].message.content.strip()
+            res_text = response.text.strip()
             
             if is_p_pattern:
                 if re.search(r"A\s*[:：]", res_text):
@@ -206,9 +185,6 @@ async def ask_ai(prompt: str) -> str:
 # 9. 褒め言葉判定関数
 # --------------------------------------------------
 def is_praised(text: str) -> bool:
-    """
-    ユーザーのメッセージがモーガン先生を褒める・感謝する内容かを判定します。
-    """
     praise_patterns = [
         r"すごい", r"スゴイ", r"偉い", r"えらい", r"助かった",
         r"可愛い", r"かわいい",
@@ -224,7 +200,7 @@ def is_praised(text: str) -> bool:
 # --------------------------------------------------
 def is_inappropriate(text: str) -> bool:
     bad_words = [
-        r"死ね", r"バカ", r"アホ", r"うざ", r"雑魚", r"カス",
+        r"死ね", r"バカ", r"アホ", r"うざ", r"雑魚", 
         r"ちんこ", r"まんこ", r"おっぱい", r"セキュ", r"エロ", r"SEX", r"sex",
         r"ふざけ", r"煽り", r"ばか"
     ]
@@ -256,7 +232,6 @@ async def on_message(message: discord.Message):
 
     user_input = message.content.strip()
 
-    # --- 画像添付の判定 ---
     has_image = any(
         attachment.content_type and attachment.content_type.startswith("image/") 
         for attachment in message.attachments
@@ -268,14 +243,12 @@ async def on_message(message: discord.Message):
     if not user_input:
         return
 
-    # --- 絵文字のみの判定 ---
     if is_only_emoji(user_input):
         await message.reply("絵文字のみのメッセージにはお答えできません。文字（テキスト）で質問内容を入力してくださいね。")
         return
 
     user_id = message.author.id
 
-    # --- 不真面目・下ネタ・煽り・罵詈雑言の判定 ---
     if is_inappropriate(user_input):
         current_count = user_warning_counts.get(user_id, 0) + 1
         user_warning_counts[user_id] = current_count
@@ -292,23 +265,18 @@ async def on_message(message: discord.Message):
 
     user_warning_counts[user_id] = 0
 
-    # --- 褒め言葉の判定（「えへへ、ありがとうございます」を返答） ---
     if is_praised(user_input):
         await message.reply("えへへ、ありがとうございます！そう言っていただけると励みになります♪")
         return
 
-    # --- 通常のAI回答処理 ---
     reply_msg = await message.reply("考え中… 🤔")
     ai_response = await ask_ai(user_input)
     
-    # 閾値の設定（1500文字を超える場合はファイル化して送信）
     FILE_THRESHOLD = 1500
 
     if len(ai_response) <= FILE_THRESHOLD:
-        # 1500文字以内の場合はそのままテキストで送信
         await reply_msg.edit(content=ai_response)
     else:
-        # 1500文字を超える場合は .txt ファイル化して送信
         file_data = io.BytesIO(ai_response.encode('utf-8'))
         discord_file = discord.File(fp=file_data, filename="response.txt")
         
