@@ -153,11 +153,11 @@ async def ask_ai(prompt: str) -> str:
     loop = asyncio.get_running_loop()
     for attempt in range(2):
         try:
-            # Gemini APIの呼び出し（モデル：gemini-2.0-flash）
+            # Gemini APIの呼び出し（モデル：gemini-3.6-flash）
             response = await loop.run_in_executor(
                 None,
                 lambda: ai_client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-3.6-flash",  # 最新モデル名に変更
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
