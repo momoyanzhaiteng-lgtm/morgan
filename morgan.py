@@ -162,7 +162,7 @@ async def ask_ai(prompt: str) -> str:
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         temperature=0.0 if is_p_pattern else 0.3,
-                        max_output_tokens=1000,
+                        max_output_tokens=3000,
                     )
                 )
             )
